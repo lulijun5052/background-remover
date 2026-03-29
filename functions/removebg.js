@@ -1,52 +1,42 @@
 const API_KEY = 'PJAVTGFzBq1FmhnaKpHqy2Dk';
 const API_URL = 'https://api.remove.bg/v1.0/removebg';
 
-function parseMultipart(buffer, boundary) {
-  const parts = [];
-  const bStart = '--' + boundary;
-  let pos = 0;
-  while (true) {
-    const bPos = buffer.indexOf(bStart, pos);
-    if (bPos === -1) break;
-    const nextPos = buffer.indexOf(bStart, bPos + bStart.length);
-    if (nextPos === -1) break;
-    let chunk = buffer.slice(bPos + bStart.length, nextPos);
-    pos = nextPos + bStart.length;
-    if (chunk[0] === 0x2D && chunk[1] === 0x2D) continue;
-    if (chunk[0] === 0x0D && chunk[1] === 0x0A) chunk = chunk.slice(2);
-    let he = -1;
-    for (let i = 0; i < chunk.length - 3; i++) {
-      if (chunk[i] === 0x0D && chunk[i+1] === 0x0A && chunk[i+2] === 0x0D && chunk[i+3] === 0x0A) { he = i; break; }
-    }
-    if (he === -1) continue;
-    const headerStr = chunk.slice(0, he).toString('utf8');
-    let bodyData = chunk.slice(he + 4);
-    if (bodyData.length >= 2 && bodyData[bodyData.length-2] === 0x0D && bodyData[bodyData.length-1] === 0x0A) bodyData = bodyData.slice(0, -2);
-    const nm = headerStr.match(/name="([^"]+)"/);
-    const fn = headerStr.match(/filename="([^"]+)"/);
-    if (nm && fn) parts.push({ name: nm[1], filename: fn[1], data: bodyData });
-  }
-  return parts;
-}
-
 export async function onRequest(context) {
   const ct = context.request.headers.get('content-type') || '';
-  const m = ct.match(/boundary=(.+)/);
-  if (!m) return new Response(JSON.stringify({ error: 'Missing boundary' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+  const body = await context.request.text();
   
-  const body = await context.request.arrayBuffer();
-  const buf = new Uint8Array(body);
-  const parts = parseMultipart(buf, m[1]);
-  const img = parts.find(p => p.name === 'image_file' || p.name === 'image');
-  if (!img) return new Response(JSON.stringify({ error: 'No image' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-  
+  // Try to parse as FormData directly
   const fd = new FormData();
-  fd.append('image_file', new Blob([img.data], { type: 'image/jpeg' }), img.filename);
-  fd.append('size', 'auto');
-  fd.append('format', 'png');
+  // Use FileReader approach or let FormData handle it
   
-  const r = await fetch(API_URL, { method: 'POST', headers: { 'X-Api-Key': API_KEY }, body: fd });
-  if (!r.ok) return new Response(JSON.stringify({ error: 'API error' }), { status: r.status, headers: { 'Content-Type': 'application/json' } });
+  // Let's try getting the file via context.request.formData()
+  const formData = await context.request.formData();
+  const imageFile = formData.get('image_file');
+  
+  if (!imageFile || typeof imageFile === 'string') {
+    const allKeys = [...formData.keys()];
+    return new Response(JSON.stringify({ error: 'No image', debug: { keys: allKeys, ct: ct.substring(0, 100), bodyLen: body.length } }), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+  
+  const removeBgFd = new FormData();
+  removeBgFd.append('image_file', imageFile);
+  removeBgFd.append('size', 'auto');
+  removeBgFd.append('format', 'png');
+  
+  const r = await fetch(API_URL, {
+    method: 'POST',
+    headers: { 'X-Api-Key': API_KEY },
+    body: removeBgFd,
+  });
+  
+  if (!r.ok) {
+    const errText = await r.text();
+    return new Response(JSON.stringify({ error: 'API error', details: errText }), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
   
   return new Response(r.body, { headers: { 'Content-Type': 'image/png' } });
 }
