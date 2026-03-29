@@ -1,0 +1,8 @@
+name = "background-remover"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+account_id = "4a2b4f57f59f6618122bc7c1bbde15cf"
+
+[vars]
+# API key is stored here for reference - in production use wrangler secret
+REMOVE_BG_API_KEY = "PJAVTGFzBq1FmhnaKpHqy2Dk"
